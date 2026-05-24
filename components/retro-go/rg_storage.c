@@ -14,6 +14,10 @@
 #include <driver/sdmmc_host.h>
 #define SDCARD_DO_TRANSACTION sdmmc_host_do_transaction
 #endif
+#if defined(RG_STORAGE_SDMMC_LDO_CHAN)
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "esp_ldo_regulator.h"
+#endif
 
 #ifdef ESP_PLATFORM
 #include <esp_vfs_fat.h>
@@ -121,20 +125,59 @@ void rg_storage_init(void)
     RG_LOGI("Looking for SD Card using SDMMC...");
 
     sdmmc_host_t host_config = SDMMC_HOST_DEFAULT();
-    host_config.flags = SDMMC_HOST_FLAG_1BIT;
     host_config.slot = RG_STORAGE_SDMMC_HOST;
     host_config.max_freq_khz = RG_STORAGE_SDMMC_SPEED;
     host_config.do_transaction = &sdcard_do_transaction;
 
+#if defined(RG_STORAGE_SDMMC_LDO_CHAN)
+    {
+        esp_ldo_channel_config_t ldo_off_cfg = {
+            .chan_id = RG_STORAGE_SDMMC_LDO_CHAN,
+            .flags.adjustable = true,
+        };
+        esp_ldo_channel_handle_t ldo_chan = NULL;
+        if (esp_ldo_acquire_channel(&ldo_off_cfg, &ldo_chan) == ESP_OK) {
+            esp_ldo_channel_adjust_voltage(ldo_chan, 0);
+            rg_usleep(100000);
+            esp_ldo_release_channel(ldo_chan);
+        }
+    }
+
+    sd_pwr_ctrl_ldo_config_t ldo_config = {
+        .ldo_chan_id = RG_STORAGE_SDMMC_LDO_CHAN,
+    };
+    sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+
+    if (ESP_OK == sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle)) {
+        host_config.pwr_ctrl_handle = pwr_ctrl_handle;
+    }
+#endif
+
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+
+#if defined(RG_GPIO_SDSPI_D3) // 4-bit SDMMC mode
+    host_config.flags = SDMMC_HOST_FLAG_4BIT;
+    slot_config.width = 4;
+#if SOC_SDMMC_USE_GPIO_MATRIX
+    slot_config.clk = RG_GPIO_SDSPI_CLK;
+    slot_config.cmd = RG_GPIO_SDSPI_CMD;
+    slot_config.d0 = RG_GPIO_SDSPI_D0;
+    slot_config.d1 = RG_GPIO_SDSPI_D1;
+    slot_config.d2 = RG_GPIO_SDSPI_D2;
+    slot_config.d3 = RG_GPIO_SDSPI_D3;
+#endif
+#else // 1-bit SDMMC mode
+    host_config.flags = SDMMC_HOST_FLAG_1BIT;
     slot_config.width = 1;
 #if SOC_SDMMC_USE_GPIO_MATRIX
     slot_config.clk = RG_GPIO_SDSPI_CLK;
     slot_config.cmd = RG_GPIO_SDSPI_CMD;
     slot_config.d0 = RG_GPIO_SDSPI_D0;
-    // d1 and d3 normally not used in width=1 but sdmmc_host_init_slot saves them, so just in case
     slot_config.d1 = slot_config.d3 = -1;
 #endif
+#endif
+
+    slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,
