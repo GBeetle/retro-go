@@ -21,6 +21,7 @@ struct lvgl_port_ppa_t {
     uint32_t             buffer_size;
     ppa_client_handle_t  srm_handle;
     ppa_srm_color_mode_t color_mode;
+    ppa_srm_color_mode_t out_color_mode;
     lvgl_port_ppa_done_cb_t done_cb;
     lvgl_port_ppa_disp_area_t done_area;
     void                 *done_user_data;
@@ -73,6 +74,7 @@ lvgl_port_ppa_handle_t lvgl_port_ppa_create(const lvgl_port_ppa_cfg_t *cfg)
                       "Error when registering PPA callbacks!");
 
     ppa_ctx->color_mode = cfg->color_mode;
+    ppa_ctx->out_color_mode = cfg->out_color_mode ? cfg->out_color_mode : cfg->color_mode;
 
 err:
     if (ret != ESP_OK) {
@@ -179,7 +181,7 @@ esp_err_t lvgl_port_ppa_rotate(lvgl_port_ppa_handle_t handle, lvgl_port_ppa_disp
         .out.pic_h = out_h,
         .out.block_offset_x = 0,
         .out.block_offset_y = 0,
-        .out.srm_cm = ppa_ctx->color_mode,
+        .out.srm_cm = ppa_ctx->out_color_mode,
 
         .rotation_angle = rotate_cfg->rotation,
         .scale_x = 1.0,

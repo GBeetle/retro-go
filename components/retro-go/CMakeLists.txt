@@ -3,7 +3,7 @@ set(COMPONENT_ADD_INCLUDEDIRS ". libs/netplay libs/lodepng")
 if((IDF_VERSION_MAJOR EQUAL 5) AND (IDF_VERSION_MINOR GREATER 2)) # esp-idf 5.3+
     set(COMPONENT_REQUIRES "spi_flash fatfs app_update json nvs_flash esp_adc esp_timer esp_psram esp_http_client esp_driver_ledc esp_driver_ppa esp_wifi driver")
     if(IDF_TARGET STREQUAL "esp32p4")
-        list(APPEND COMPONENT_REQUIRES "esp_lcd" "sdmmc")
+        list(APPEND COMPONENT_REQUIRES "esp_lcd" "sdmmc" "esp_mm")
         list(APPEND COMPONENT_SRCDIRS "drivers/display")
         list(APPEND COMPONENT_ADD_INCLUDEDIRS "drivers/display")
     endif()

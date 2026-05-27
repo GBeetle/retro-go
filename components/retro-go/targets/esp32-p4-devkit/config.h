@@ -67,3 +67,5 @@
 
 // Battery
 #define RG_BATTERY_DRIVER           0
+
+#define RG_RECOVERY_BTN             RG_KEY_MENU

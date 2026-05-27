@@ -12,6 +12,7 @@
 #include <esp_ldo_regulator.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_cache.h>
 
 #include "lcd_ppa.h"
 
@@ -211,55 +212,6 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length)
         }
     }
 
-    // PPA rotate the chunk and send to panel
-    int chunk_top = window_top + window_current_y;
-    int chunk_lines = lines;
-
-    if (chunk_top < 0) { chunk_lines += chunk_top; chunk_top = 0; }
-    if (chunk_top + chunk_lines > RG_SCREEN_HEIGHT) chunk_lines = RG_SCREEN_HEIGHT - chunk_top;
-
-    if (chunk_lines > 0 && window_width > 0) {
-        int chunk_width = RG_MIN(window_width, RG_SCREEN_WIDTH - window_left);
-        if (chunk_width > 0) {
-            // Copy chunk from framebuffer into contiguous buffer for PPA input
-            for (int line = 0; line < chunk_lines; line++) {
-                int fb_y = chunk_top + line;
-                memcpy(&buffer[line * chunk_width],
-                    &lcd_framebuffer[fb_y * RG_SCREEN_WIDTH + window_left],
-                    chunk_width * sizeof(uint16_t));
-            }
-        }
-        lvgl_port_ppa_disp_rotate_t rotate_cfg = {
-            .in_buff = (uint8_t *)buffer,
-            .area = {
-                .x1 = window_left,
-                .x2 = window_left + chunk_width - 1,
-                .y1 = chunk_top,
-                .y2 = chunk_top + chunk_lines - 1,
-            },
-            .disp_size = {
-                .hres = RG_SCREEN_WIDTH, // 640 landscape
-                .vres = RG_SCREEN_HEIGHT, // 480 landscape
-            },
-            .rotation = PPA_SRM_ROTATION_ANGLE_90,
-            .ppa_mode = PPA_TRANS_MODE_BLOCKING,
-            .swap_bytes = true, // retro-go sends BE RGB565, MIPI-DSI expects LE
-            .user_data = NULL,
-        };
-        esp_err_t err = lvgl_port_ppa_rotate(ppa_handle, &rotate_cfg);
-        if (err == ESP_OK) {
-            uint8_t *rotated = lvgl_port_ppa_get_output_buffer(ppa_handle);
-            int rx1 = rotate_cfg.area.x1;
-            int ry1 = rotate_cfg.area.y1;
-            int rx2 = rotate_cfg.area.x2;
-            int ry2 = rotate_cfg.area.y2;
-
-            esp_lcd_panel_draw_bitmap(mipi_dpi_panel, rx1, ry1, rx2 + 1, ry2 + 1, rotated);
-        } else {
-            ESP_LOGE(TAG_ST7701, "PPA rotate failed: %s", esp_err_to_name(err));
-        }
-    }
-
     window_current_y += lines;
 
     // Return the buffer to pool
@@ -268,9 +220,71 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length)
 
 static void lcd_sync(void)
 {
-    if (dpi_sync_sem) {
-        xSemaphoreTake(dpi_sync_sem, pdMS_TO_TICKS(100));
+    esp_cache_msync(lcd_framebuffer, RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * sizeof(uint16_t),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+#if 0
+    // PPA rotate the entire landscape framebuffer (640x480) to portrait (480x640)
+    // and send to the DPI panel in one shot
+    lvgl_port_ppa_disp_rotate_t rotate_cfg = {
+        .in_buff = (uint8_t *)lcd_framebuffer,
+        .area = {
+            .x1 = 0,
+            .x2 = RG_SCREEN_WIDTH - 1,
+            .y1 = 0,
+            .y2 = RG_SCREEN_HEIGHT - 1,
+        },
+        .disp_size = {
+            .hres = RG_SCREEN_WIDTH, // 640
+            .vres = RG_SCREEN_HEIGHT, // 480
+        },
+        .rotation = PPA_SRM_ROTATION_ANGLE_90,
+        .ppa_mode = PPA_TRANS_MODE_BLOCKING,
+        .swap_bytes = true, // retro-go sends BE RGB565, MIPI-DSI expects LE
+        .user_data = NULL,
+    };
+
+    esp_err_t err = lvgl_port_ppa_rotate(ppa_handle, &rotate_cfg);
+    if (err == ESP_OK) {
+        uint8_t *rotated = lvgl_port_ppa_get_output_buffer(ppa_handle);
+        esp_cache_msync(rotated, RG_MIPI_DSI_LCD_H_RES * RG_MIPI_DSI_LCD_V_RES * 3,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M)
+        // After 90° rotation: 640x480 -> 480x640 (matches panel)
+        esp_lcd_panel_draw_bitmap(mipi_dpi_panel, 0, 0,
+            RG_MIPI_DSI_LCD_H_RES, RG_MIPI_DSI_LCD_V_RES, rotated);
+        xSemaphoreTake(dpi_sync_sem, pdMS_TO_TICKS(1000));
+    } else {
+        ESP_LOGE(TAG_ST7701, "PPA rotate failed: %s", esp_err_to_name(err));
     }
+#else
+    // DEBUG: Fill panel with a solid RED test pattern (RGB888 = 3 bytes per pixel)
+    static bool filled = false;
+    if (!filled) {
+        filled = true;
+        int panel_w = RG_MIPI_DSI_LCD_H_RES; // 480
+        int panel_h = RG_MIPI_DSI_LCD_V_RES; // 640
+        int total_bytes = panel_w * panel_h * 3;
+
+        uint8_t *buf = heap_caps_aligned_calloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE,
+            total_bytes, 1,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+
+        assert(buf != NULL);
+
+        for (int i = 0; i < panel_w * panel_h; i++) {
+            buf[i * 3 + 0] = 0xFF; // R
+            buf[i * 3 + 1] = 0xFF; // G
+            buf[i * 3 + 2] = 0xFF; // B
+        }
+
+        esp_cache_msync(buf, total_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+        esp_lcd_panel_draw_bitmap(mipi_dpi_panel, 0, 0, panel_w, panel_h, buf);
+        xSemaphoreTake(dpi_sync_sem, pdMS_TO_TICKS(1000));
+
+        free(buf);
+        ESP_LOGI(TAG_ST7701, "DEBUG: Sent solid RED to panel (%dX%d RGB888)", panel_w, panel_h);
+    }
+#endif
 }
 
 static void lcd_init(void)
@@ -327,7 +341,7 @@ static void lcd_init(void)
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = 25,
         .virtual_channel = 0,
-        .in_color_format = LCD_COLOR_FMT_RGB565,
+        .in_color_format = LCD_COLOR_FMT_RGB888,
         .num_fbs = 1,
         .video_timing = {
             .h_size = RG_MIPI_DSI_LCD_H_RES, // 480
@@ -395,14 +409,14 @@ static void lcd_init(void)
     esp_lcd_dpi_panel_event_callbacks_t cbs = {
         .on_color_trans_done = dpi_flush_ready_cb,
     };
-
     esp_lcd_dpi_panel_register_event_callbacks(mipi_dpi_panel, &cbs, NULL);
 
     // 13. Init PPA rotation
-    uint32_t ppa_buf_size = RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 2;
+    uint32_t ppa_buf_size = RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 3;
     lvgl_port_ppa_cfg_t ppa_cfg = {
         .buffer_size = ppa_buf_size,
         .color_mode = PPA_SRM_COLOR_MODE_RGB565,
+        .out_color_mode = PPA_SRM_COLOR_MODE_RGB888,
         .flags = {
             .buff_dma = 1,
             .buff_spiram = 1,
@@ -424,8 +438,10 @@ static void lcd_init(void)
     // 15. Allocate buffer pool
     buffer_queue = xQueueCreate(ST7701_BUFFER_COUNT, sizeof(uint16_t *));
     for (int i = 0; i < ST7701_BUFFER_COUNT; i++) {
-        uint16_t *buf = heap_caps_aligned_alloc(64, ST7701_BUFFER_LENGTH,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+        uint16_t *buf = heap_caps_aligned_calloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE,
+                                                RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT,
+                                                sizeof(uint16_t),
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
 
         assert(buf != NULL);
         xQueueSend(buffer_queue, &buf, portMAX_DELAY);

@@ -25,6 +25,7 @@ typedef lvgl_port_ppa_t *lvgl_port_ppa_handle_t;
 typedef struct {
     uint32_t                buffer_size;  /*!< Size of the buffer for the PPA */
     ppa_srm_color_mode_t    color_mode;  /*!< Color mode of input/output data */
+    ppa_srm_color_mode_t out_color_mode;
     struct {
         unsigned int buff_dma: 1;    /*!< Allocated buffer will be DMA capable */
         unsigned int buff_spiram: 1; /*!< Allocated buffer will be in PSRAM */
