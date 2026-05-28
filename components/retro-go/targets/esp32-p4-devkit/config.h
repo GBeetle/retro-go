@@ -14,9 +14,9 @@
 #define RG_GPIO_SDSPI_D2            GPIO_NUM_41
 #define RG_GPIO_SDSPI_D3            GPIO_NUM_42
 
-// Audio
-#define RG_AUDIO_USE_INT_DAC        0   // 0 = Disable, 1 = GPIO25, 2 = GPIO26, 3 = Both
-#define RG_AUDIO_USE_EXT_DAC        1   // 0 = Disable, 1 = Enable
+// Audio (disabled - I2S legacy driver panics on ESP32-P4 HW v2)
+#define RG_AUDIO_USE_INT_DAC        0
+#define RG_AUDIO_USE_EXT_DAC        0
 #define RG_GPIO_SND_I2S_BCK         47
 #define RG_GPIO_SND_I2S_WS          46
 #define RG_GPIO_SND_I2S_DATA        48
@@ -42,14 +42,7 @@
 #define RG_GPIO_I2C_SCL             GPIO_NUM_21
 
 // Input
-// Refer to rg_input.h to see all available RG_KEY_* and RG_GAMEPAD_*_MAP types
-#define RG_GAMEPAD_ADC_MAP {\
-    {RG_KEY_UP,    ADC_UNIT_1, ADC_CHANNEL_5, ADC_ATTEN_DB_11, 3072, 4096},\
-    {RG_KEY_RIGHT, ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 1024, 3071},\
-    {RG_KEY_DOWN,  ADC_UNIT_1, ADC_CHANNEL_5, ADC_ATTEN_DB_11, 1024, 3071},\
-    {RG_KEY_LEFT,  ADC_UNIT_1, ADC_CHANNEL_6, ADC_ATTEN_DB_11, 3072, 4096},\
-}
-
+// All buttons via GPIO (active low with pullup). D-pad on 26-30, action on 11-50.
 #define RG_GAMEPAD_GPIO_MAP {\
     {RG_KEY_UP,     .num = GPIO_NUM_28, .pullup = 1, .level = 0},\
     {RG_KEY_DOWN,   .num = GPIO_NUM_26, .pullup = 1, .level = 0},\

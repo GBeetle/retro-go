@@ -27,7 +27,7 @@ static const char *SETTING_ROTATION = "DispRotation";
 static const char *SETTING_BORDER = "DispBorder";
 static const char *SETTING_CUSTOM_ZOOM = "DispCustomZoom";
 
-static void lcd_init(void);
+static bool lcd_init(void);
 static void lcd_deinit(void);
 static void lcd_sync(void);
 static void lcd_set_rotation(int rotation);
@@ -616,8 +616,8 @@ void rg_display_clear(uint16_t color_le)
 
 void rg_display_deinit(void)
 {
-    rg_task_send(display_task_queue, &(rg_task_msg_t){.type = RG_TASK_MSG_STOP});
-    // lcd_set_backlight(0);
+    if (display_task_queue)
+        rg_task_send(display_task_queue, &(rg_task_msg_t){.type = RG_TASK_MSG_STOP});
     lcd_deinit();
     RG_LOGI("Display terminated.\n");
 }
@@ -644,9 +644,13 @@ void rg_display_init(void)
     };
     display.screen.width -= display.screen.margins.left + display.screen.margins.right;
     display.screen.height -= display.screen.margins.top + display.screen.margins.bottom;
-    lcd_init();
+    if (!lcd_init())
+    {
+        RG_LOGE("Display hardware init failed, continuing without display.\n");
+        return;
+    }
     rg_display_clear(C_BLACK);
-    rg_task_delay(80); // Wait for the screen be cleared before turning on the backlight (40ms doesn't seem to be enough...)
+    rg_task_delay(80);
     lcd_set_backlight(config.backlight);
     display_task_queue = rg_task_create("rg_display", &display_task, NULL, 4 * 1024, RG_TASK_PRIORITY_6, 1);
     if (config.border_file)

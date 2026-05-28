@@ -227,6 +227,8 @@ static void input_task(void *arg)
     {
         if (rg_input_read_gamepad_raw(&state))
         {
+            uint32_t prev_state = local_gamepad_state;
+
             for (int i = 0; i < RG_KEY_COUNT; ++i)
             {
                 uint32_t val = ((debounce[i] << 1) | ((state >> i) & 1));
@@ -241,6 +243,21 @@ static void input_task(void *arg)
                     local_gamepad_state &= ~(1 << i); // Released
                 }
             }
+
+            uint32_t changed = prev_state ^ local_gamepad_state;
+            if (changed)
+            {
+                for (int i = 0; i < RG_KEY_COUNT; ++i)
+                {
+                    if (changed & (1 << i))
+                    {
+                        RG_LOGI("%s %s",
+                                rg_input_get_key_name(1 << i),
+                                (local_gamepad_state & (1 << i)) ? "PRESSED" : "released");
+                    }
+                }
+            }
+
             gamepad_state = local_gamepad_state;
         }
 

@@ -65,7 +65,11 @@ static const char *get_last_driver_error(void)
 
 void rg_audio_init(int sampleRate)
 {
-    RG_ASSERT(audio.sink == NULL, "Audio sink already initialized!");
+    if (audio.sink)
+    {
+        RG_LOGW("Audio already initialized, skipping.\n");
+        return;
+    }
 
     if (!audio.lock)
     {

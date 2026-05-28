@@ -41,6 +41,10 @@ static int window_current_y;
 // Sync semaphore for DPI transfers
 static SemaphoreHandle_t dpi_sync_sem = NULL;
 
+// Track init state for safe deinit
+static bool lcd_i2c_initialized = false;
+static esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
+
 // --- I2C / PCA9536 helpers (for backlight and reset) ---
 
 #define PCA9536_ADDR 0x41
@@ -109,42 +113,69 @@ typedef struct {
 } st7701_init_cmd_t;
 
 static const st7701_init_cmd_t vendor_init_cmds[] = {
-    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
-    {0xFF, (uint8_t[]){0x08}, 1, 0},
-    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x10}, 5, 0},
-    {0xC0, (uint8_t[]){0x4f, 0x00}, 2, 0},
-    {0xC1, (uint8_t[]){0x10, 0x00}, 2, 0},
-    {0xC2, (uint8_t[]){0x07, 0x14}, 2, 0},
-    {0xC3, (uint8_t[]){0x10}, 1, 0},
-    {0xB0, (uint8_t[]){0xa0, 0x18, 0xe1, 0x12, 0x16, 0x0c, 0x0e, 0x0d, 0x0b, 0x09, 0x14, 0x13, 0x29, 0x33, 0x1c}, 16, 0},
-    {0xB1, (uint8_t[]){0xa0, 0x19, 0x21, 0xa0, 0x0c, 0x0e, 0x0d, 0x0b, 0x09, 0x14, 0x13, 0x29, 0x27, 0x2b, 0x1c}, 16, 0},
-    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x11}, 5, 0},
-    {0xB0, (uint8_t[]){0x5d}, 1, 0},
-    {0xB1, (uint8_t[]){0x61}, 1, 0},
-    {0xB2, (uint8_t[]){0x84}, 1, 0},
-    {0xB3, (uint8_t[]){0x80}, 1, 0},
-    {0xB5, (uint8_t[]){0x4d}, 1, 0},
-    {0xB7, (uint8_t[]){0x85}, 1, 0},
-    {0xB8, (uint8_t[]){0x20}, 1, 0},
-    {0xC1, (uint8_t[]){0x78}, 1, 0},
-    {0xC2, (uint8_t[]){0x78}, 1, 0},
-    {0xD0, (uint8_t[]){0x88}, 1, 0},
-    {0xE0, (uint8_t[]){0x06, 0x00, 0x00, 0x02}, 3, 0},
-    {0xE1, (uint8_t[]){0x06, 0xa0, 0x08, 0xa0, 0x05, 0xa0, 0x07, 0xa0, 0x04, 0x44, 0x44}, 11, 0},
-    {0xE2, (uint8_t[]){0x20, 0x24, 0x44, 0x44, 0x94, 0x96, 0x90, 0x90, 0x90, 0x90, 0x00}, 12, 0},
-    {0xE3, (uint8_t[]){0x00, 0x22, 0x22}, 4, 0},
-    {0xE4, (uint8_t[]){0x44, 0x44}, 2, 0},
-    {0xE5, (uint8_t[]){0xd0, 0x91, 0xa0, 0xa0, 0xf9, 0x93, 0xa0, 0xa0, 0x89, 0x8d, 0xa0, 0xa0, 0xb8, 0xf8, 0xa0, 0xa0}, 16, 0},
-    {0xE6, (uint8_t[]){0x00, 0x22, 0x22}, 4, 0},
-    {0xE7, (uint8_t[]){0x44, 0x44}, 2, 0},
-    {0xE8, (uint8_t[]){0xc0, 0x90, 0xa0, 0xa0, 0xe0, 0x92, 0xa0, 0xa0, 0x88, 0xc8, 0xa0, 0xa0, 0x8a, 0xe0, 0xa0, 0xa0}, 16, 0},
-    {0xE9, (uint8_t[]){0x36, 0x00}, 2, 0},
-    {0xEB, (uint8_t[]){0x00, 0x01, 0xe4, 0xe4, 0x44, 0x88, 0x40}, 7, 0},
-    {0xED, (uint8_t[]){0xff, 0x45, 0x67, 0xfa, 0x01, 0x2b, 0xcf, 0xff, 0xff, 0xfc, 0xb2, 0x10, 0xaf, 0x76, 0x54, 0xff}, 16, 0},
-    {0xEF, (uint8_t[]){0x10, 0x0d, 0x0d, 0x08, 0x3f, 0x1f}, 6, 0},
-    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
-    {0x11, (uint8_t[]){0x00}, 1, 120}, // Sleep out
-    {0x29, (uint8_t[]){0x00}, 1, 20}, // Display on
+    // 2.8 inch
+    { 0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
+    // Unknown
+    { 0xEF, (uint8_t[]){0x08},1, 0},
+    // Command2 BK0 Selection: Disable the BK function of Command2
+    { 0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x10},5, 0},
+    // Display Line Setting
+    { 0xC0, (uint8_t[]){0x4f, 0x00},2, 0},
+    // Porch Control
+    { 0xC1, (uint8_t[]){0x10, 0x0c},2, 0},
+    // Inversion selection & Frame Rate Control
+    { 0xC2, (uint8_t[]){0x07, 0x14},2, 0},
+    // Unknown
+    { 0xCC, (uint8_t[]){0x10}, 1,0},
+    // Positive Voltage Gamma Control
+    { 0xB0, (uint8_t[]){0x0a, 0x18, 0x1e, 0x12, 0x16, 0x0c, 0x0e, 0x0d, 0x0c,0x29, 0x06, 0x14, 0x13, 0x29, 0x33, 0x1c},16, 0},
+    // Negative Voltage Gamma Control
+    { 0xB1, (uint8_t[]){0x0a, 0x19, 0x21, 0x0a, 0x0c, 0x00, 0x0c, 0x03, 0x03,0x23, 0x01, 0x0e, 0x0c, 0x27, 0x2b, 0x1c},16, 0},
+
+    // Command2 BK1 Selection: Enable the BK function of Command2
+    { 0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x11}, 5, 0},
+    // Vop Amplitude setting
+    { 0xB0, (uint8_t[]){0x5d},1, 0},
+    // VCOM amplitude setting
+    { 0xB1, (uint8_t[]){0x61},1, 0},
+    // VGH Voltage setting
+    { 0xB2, (uint8_t[]){0x84},1, 0},
+    // TEST Command Setting
+    { 0xB3, (uint8_t[]){0x80},1, 0},
+    // VGL Voltage setting
+    { 0xB5, (uint8_t[]){0x4d},1, 0},
+    // Power Control 1
+    { 0xB7, (uint8_t[]){0x85},1, 0},
+    // Power Control 2
+    { 0xB8, (uint8_t[]){0x20},1, 0},
+    // Source pre_drive timing set1
+    { 0xC1, (uint8_t[]){0x78},1, 0},
+    // Source EQ2 Setting
+    { 0xC2, (uint8_t[]){0x78},1, 0},
+    // MIPI Setting 1
+    { 0xD0, (uint8_t[]){0x88},1, 0},
+    // GIP Code
+    { 0xE0, (uint8_t[]){0x00, 0x00, 0x02}, 3, 0},
+    { 0xE1, (uint8_t[]){0x06, 0xa0, 0x08, 0xa0, 0x05, 0xa0, 0x07, 0xa0, 0x00,0x44, 0x44}, 11, 0},
+    { 0xE2, (uint8_t[]){0x20, 0x20, 0x44, 0x44, 0x96, 0xa0, 0x00, 0x00, 0x96,0xa0, 0x00, 0x00}, 12, 0},
+    { 0xE3, (uint8_t[]){0x00, 0x00, 0x22, 0x22}, 4, 0},
+    { 0xE4, (uint8_t[]){0x44, 0x44}, 2, 0},
+    { 0xE5, (uint8_t[]){0x0d, 0x91, 0xa0, 0xa0, 0x0f, 0x93, 0xa0, 0xa0, 0x09,0x8d, 0xa0, 0xa0, 0x0b, 0x8f, 0xa0, 0xa0}, 16, 0},
+    { 0xE6, (uint8_t[]){0x00, 0x00, 0x22, 0x22}, 4, 0},
+    { 0xE7, (uint8_t[]){0x44, 0x44}, 2, 0},
+    { 0xE8, (uint8_t[]){0x0c, 0x90, 0xa0, 0xa0, 0x0e, 0x92, 0xa0, 0xa0, 0x08,0x8c, 0xa0, 0xa0, 0x0a, 0x8e, 0xa0, 0xa0}, 16, 0},
+    { 0xE9, (uint8_t[]){0x36, 0x00}, 2, 0},
+    { 0xEB, (uint8_t[]){0x00, 0x01, 0xe4, 0xe4, 0x44, 0x88, 0x40}, 7, 0},
+    { 0xED, (uint8_t[]){0xff, 0x45, 0x67, 0xfa, 0x01, 0x2b, 0xcf, 0xff, 0xff,0xfc, 0xb2, 0x10, 0xaf, 0x76, 0x54, 0xff}, 16, 0},
+    { 0xEF, (uint8_t[]){0x10, 0x0d, 0x04, 0x08, 0x3f, 0x1f}, 6, 0},
+
+    // disable Command2
+    { 0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
+    //add
+    { 0x11, (uint8_t[]){0x00}, 1, 120}, // Sleep out, delay 120ms
+    // enable Command2
+    {0x29, (uint8_t[]){0x00}, 1, 20} // Display on, delay 20ms
+
 };
 
 static bool dpi_flush_ready_cb(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *edata, void *user_ctx)
@@ -166,6 +197,7 @@ static void lcd_set_rotation(int rotation)
 
 static void lcd_set_backlight(float percent)
 {
+    if (!lcd_i2c_initialized) return;
     bool on = (percent > 0);
     pca9536_set_pin(PCA9536_PIN_BCKL, on);
     ESP_LOGI(TAG_ST7701, "backlight %s", on ? "on" : "off");
@@ -222,7 +254,7 @@ static void lcd_sync(void)
 {
     esp_cache_msync(lcd_framebuffer, RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * sizeof(uint16_t),
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-#if 0
+#if 1
     // PPA rotate the entire landscape framebuffer (640x480) to portrait (480x640)
     // and send to the DPI panel in one shot
     lvgl_port_ppa_disp_rotate_t rotate_cfg = {
@@ -247,7 +279,7 @@ static void lcd_sync(void)
     if (err == ESP_OK) {
         uint8_t *rotated = lvgl_port_ppa_get_output_buffer(ppa_handle);
         esp_cache_msync(rotated, RG_MIPI_DSI_LCD_H_RES * RG_MIPI_DSI_LCD_V_RES * 3,
-                        ESP_CACHE_MSYNC_FLAG_DIR_C2M)
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M);
         // After 90° rotation: 640x480 -> 480x640 (matches panel)
         esp_lcd_panel_draw_bitmap(mipi_dpi_panel, 0, 0,
             RG_MIPI_DSI_LCD_H_RES, RG_MIPI_DSI_LCD_V_RES, rotated);
@@ -287,8 +319,10 @@ static void lcd_sync(void)
 #endif
 }
 
-static void lcd_init(void)
+static bool lcd_init(void)
 {
+    esp_err_t err;
+
     ESP_LOGI(TAG_ST7701, "Initializing ST7701 MIPI-DSI display (GB-Drone remote)");
 
     // 1. Init I2C for PCA9536
@@ -301,20 +335,24 @@ static void lcd_init(void)
         .master.clk_speed = 100000,
     };
 
-    ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &i2c_conf));
-    ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+    err = i2c_param_config(I2C_NUM_0, &i2c_conf);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "I2C param config failed: %s", esp_err_to_name(err)); goto fail; }
+    err = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "I2C driver install failed: %s", esp_err_to_name(err)); goto fail; }
+    lcd_i2c_initialized = true;
 
     // Configure PCA9536 all pins as outputs
-    ESP_ERROR_CHECK(pca9536_write_reg(PCA9536_CONFIG_REG, 0x00));
+    err = pca9536_write_reg(PCA9536_CONFIG_REG, 0x00);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "PCA9536 config failed: %s", esp_err_to_name(err)); goto fail; }
 
     // 2. Enable MIPI DSI PHY LDO
-    esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
     esp_ldo_channel_config_t ldo_config = {
         .chan_id = RG_MIPI_DSI_PHY_LDO_CHAN,
         .voltage_mv = RG_MIPI_DSI_PHY_VOLTAGE_MV,
     };
 
-    ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_config, &ldo_mipi_phy));
+    err = esp_ldo_acquire_channel(&ldo_config, &ldo_mipi_phy);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "MIPI DSI PHY LDO acquire failed: %s", esp_err_to_name(err)); goto fail; }
     ESP_LOGI(TAG_ST7701, "MIPI DSI PHY LDO powered on");
 
     // 3. Create MIPI DSI bus
@@ -325,7 +363,8 @@ static void lcd_init(void)
         .lane_bit_rate_mbps = RG_MIPI_DSI_LANE_BITRATE_MBPS,
     };
 
-    ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus));
+    err = esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "MIPI DSI bus create failed: %s", esp_err_to_name(err)); goto fail; }
 
     // 4. Create DBI IO for commands
     esp_lcd_dbi_io_config_t dbi_config = {
@@ -334,7 +373,8 @@ static void lcd_init(void)
         .lcd_param_bits = 8,
     };
 
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &mipi_dbi_io));
+    err = esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &mipi_dbi_io);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "DBI panel IO create failed: %s", esp_err_to_name(err)); goto fail; }
 
     // 5. Create DPI panel (480x640, RGB565)
     esp_lcd_dpi_panel_config_t dpi_config = {
@@ -344,8 +384,8 @@ static void lcd_init(void)
         .in_color_format = LCD_COLOR_FMT_RGB888,
         .num_fbs = 1,
         .video_timing = {
-            .h_size = RG_MIPI_DSI_LCD_H_RES, // 480
-            .v_size = RG_MIPI_DSI_LCD_V_RES, // 640
+            .h_size = RG_MIPI_DSI_LCD_H_RES,
+            .v_size = RG_MIPI_DSI_LCD_V_RES,
             .hsync_back_porch = 30,
             .hsync_pulse_width = 10,
             .hsync_front_porch = 30,
@@ -356,8 +396,8 @@ static void lcd_init(void)
         .flags.use_dma2d = true,
     };
 
-    esp_lcd_dsi_bus_handle_t dsi_bus = mipi_dsi_bus;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_config, &mipi_dpi_panel));
+    err = esp_lcd_new_panel_dpi(mipi_dsi_bus, &dpi_config, &mipi_dpi_panel);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "DPI panel create failed: %s", esp_err_to_name(err)); goto fail; }
     ESP_LOGI(TAG_ST7701, "DPI panel created (480x640 RGB565)");
 
     // 6. Software reset
@@ -388,17 +428,20 @@ static void lcd_init(void)
     }
 
     // 9. Send vendor init commands
-    const int cmd_count = sizeof(vendor_init_cmds) / sizeof(st7701_init_cmd_t);
-    ESP_LOGI(TAG_ST7701, "Sending %d init commands...", cmd_count);
-    for (int i = 0; i < cmd_count; i++) {
-        const st7701_init_cmd_t *cmd = &vendor_init_cmds[i];
-        esp_lcd_panel_io_tx_param(mipi_dbi_io, cmd->cmd, cmd->data, cmd->data_len);
-        if (cmd->delay_ms > 0)
-            vTaskDelay(pdMS_TO_TICKS(cmd->delay_ms));
+    {
+        const int cmd_count = sizeof(vendor_init_cmds) / sizeof(st7701_init_cmd_t);
+        ESP_LOGI(TAG_ST7701, "Sending %d init commands...", cmd_count);
+        for (int i = 0; i < cmd_count; i++) {
+            const st7701_init_cmd_t *cmd = &vendor_init_cmds[i];
+            esp_lcd_panel_io_tx_param(mipi_dbi_io, cmd->cmd, cmd->data, cmd->data_len);
+            if (cmd->delay_ms > 0)
+                vTaskDelay(pdMS_TO_TICKS(cmd->delay_ms));
+        }
     }
 
     // 10. Initialize DPI panel (starts video stream)
-    ESP_ERROR_CHECK(esp_lcd_panel_init(mipi_dpi_panel));
+    err = esp_lcd_panel_init(mipi_dpi_panel);
+    if (err != ESP_OK) { ESP_LOGE(TAG_ST7701, "DPI panel init failed: %s", esp_err_to_name(err)); goto fail; }
     ESP_LOGI(TAG_ST7701, "DPI panel initialized - video stream active");
 
     // 11. Enable backlight
@@ -406,49 +449,71 @@ static void lcd_init(void)
 
     // 12. Register DPI event callback for sync
     dpi_sync_sem = xSemaphoreCreateBinary();
-    esp_lcd_dpi_panel_event_callbacks_t cbs = {
-        .on_color_trans_done = dpi_flush_ready_cb,
-    };
-    esp_lcd_dpi_panel_register_event_callbacks(mipi_dpi_panel, &cbs, NULL);
+    if (dpi_sync_sem) {
+        esp_lcd_dpi_panel_event_callbacks_t cbs = {
+            .on_color_trans_done = dpi_flush_ready_cb,
+        };
+        esp_lcd_dpi_panel_register_event_callbacks(mipi_dpi_panel, &cbs, NULL);
+    }
 
     // 13. Init PPA rotation
-    uint32_t ppa_buf_size = RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 3;
-    lvgl_port_ppa_cfg_t ppa_cfg = {
-        .buffer_size = ppa_buf_size,
-        .color_mode = PPA_SRM_COLOR_MODE_RGB565,
-        .out_color_mode = PPA_SRM_COLOR_MODE_RGB888,
-        .flags = {
-            .buff_dma = 1,
-            .buff_spiram = 1,
-        },
-    };
+    {
+        uint32_t ppa_buf_size = RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 3;
+        lvgl_port_ppa_cfg_t ppa_cfg = {
+            .buffer_size = ppa_buf_size,
+            .color_mode = PPA_SRM_COLOR_MODE_RGB565,
+            .out_color_mode = PPA_SRM_COLOR_MODE_RGB888,
+            .flags = {
+                .buff_dma = 1,
+                .buff_spiram = 1,
+            },
+        };
+        ppa_handle = lvgl_port_ppa_create(&ppa_cfg);
+        if (!ppa_handle) {
+            ESP_LOGW(TAG_ST7701, "PPA SRM client init failed, rotation disabled");
+        } else {
+            ESP_LOGI(TAG_ST7701, "PPA SRM client initialized");
+        }
+    }
 
-    ppa_handle = lvgl_port_ppa_create(&ppa_cfg);
-    assert(ppa_handle != NULL);
-    ESP_LOGI(TAG_ST7701, "PPA SRM client initialized");
-
-    // 14. Allocate landscape framebuffer (640x480 RGB565)
-    lcd_framebuffer = heap_caps_calloc(RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT, sizeof(uint16_t),
+    // 14. Allocate landscape framebuffer (640x480 RGB565, cache-line aligned)
+    lcd_framebuffer = heap_caps_aligned_calloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE,
+        RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT, sizeof(uint16_t),
         MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-
-    assert(lcd_framebuffer != NULL);
+    if (!lcd_framebuffer) {
+        ESP_LOGE(TAG_ST7701, "Framebuffer allocation failed (%d bytes)",
+            RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 2);
+        goto fail;
+    }
     ESP_LOGI(TAG_ST7701, "Framebuffer allocated: %dx%d RGB565 (%d bytes)",
         RG_SCREEN_WIDTH, RG_SCREEN_HEIGHT, RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 2);
 
     // 15. Allocate buffer pool
     buffer_queue = xQueueCreate(ST7701_BUFFER_COUNT, sizeof(uint16_t *));
+    if (!buffer_queue) {
+        ESP_LOGE(TAG_ST7701, "Buffer queue creation failed");
+        goto fail;
+    }
     for (int i = 0; i < ST7701_BUFFER_COUNT; i++) {
         uint16_t *buf = heap_caps_aligned_calloc(CONFIG_CACHE_L2_CACHE_LINE_SIZE,
                                                 RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT,
                                                 sizeof(uint16_t),
                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-
-        assert(buf != NULL);
+        if (!buf) {
+            ESP_LOGE(TAG_ST7701, "Buffer pool entry %d allocation failed", i);
+            goto fail;
+        }
         xQueueSend(buffer_queue, &buf, portMAX_DELAY);
     }
 
     ESP_LOGI(TAG_ST7701, "ST7701 MIPI-DSI display initialized (logical %dx%d, physical %dx%d)",
         RG_SCREEN_WIDTH, RG_SCREEN_HEIGHT, RG_MIPI_DSI_LCD_H_RES, RG_MIPI_DSI_LCD_V_RES);
+    return true;
+
+fail:
+    ESP_LOGE(TAG_ST7701, "Display init failed, system will continue without display");
+    lcd_deinit();
+    return false;
 }
 
 static void lcd_deinit(void)
@@ -464,6 +529,26 @@ static void lcd_deinit(void)
     if (dpi_sync_sem) {
         vSemaphoreDelete(dpi_sync_sem);
         dpi_sync_sem = NULL;
+    }
+    if (mipi_dpi_panel) {
+        esp_lcd_panel_del(mipi_dpi_panel);
+        mipi_dpi_panel = NULL;
+    }
+    if (mipi_dbi_io) {
+        esp_lcd_panel_io_del(mipi_dbi_io);
+        mipi_dbi_io = NULL;
+    }
+    if (mipi_dsi_bus) {
+        esp_lcd_del_dsi_bus(mipi_dsi_bus);
+        mipi_dsi_bus = NULL;
+    }
+    if (ldo_mipi_phy) {
+        esp_ldo_release_channel(ldo_mipi_phy);
+        ldo_mipi_phy = NULL;
+    }
+    if (lcd_i2c_initialized) {
+        i2c_driver_delete(I2C_NUM_0);
+        lcd_i2c_initialized = false;
     }
 }
 

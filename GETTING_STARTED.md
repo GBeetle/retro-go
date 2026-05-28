@@ -64,29 +64,71 @@ python rg_tool.py --target=esp32-p4-devkit --port=COM6 --no-networking monitor l
 
 ---
 
-## 5. SD Card Setup
+## 5. Adding Games to the SD Card
 
-Insert an SD card with this structure:
+Format your SD card as **FAT32**. Insert it into your PC. The launcher scans specific folder names on the SD card root — each system has a fixed folder and accepted file extensions:
+
+| System | SD Card Folder | File Extensions |
+|--------|---------------|-----------------|
+| NES | `SD:\nes\` | `.nes .fc .fds .nsf .zip` |
+| SNES | `SD:\snes\` | `.smc .sfc .zip` |
+| Game Boy | `SD:\gb\` | `.gb .gbc .zip` |
+| Game Boy Color | `SD:\gbc\` | `.gbc .gb .zip` |
+| Game Boy Advance | `SD:\gba\` | `.gba .zip` |
+| Game & Watch | `SD:\gw\` | `.gw` |
+| Master System | `SD:\sms\` | `.sms .sg .zip` |
+| Game Gear | `SD:\gg\` | `.gg .zip` |
+| Mega Drive / Genesis | `SD:\md\` | `.md .gen .bin .zip` |
+| ColecoVision | `SD:\col\` | `.col .rom .zip` |
+| PC Engine | `SD:\pce\` | `.pce .zip` |
+| Atari Lynx | `SD:\lnx\` | `.lnx .zip` |
+| DOOM | `SD:\doom\` | `.wad .zip` |
+| MSX | `SD:\msx\` | `.rom .mx1 .mx2 .dsk` |
+
+### How to copy games (Windows)
+
+1. Insert SD card into your PC
+2. Open File Explorer, find the SD card drive (e.g. `D:\`)
+3. Create the matching folder if it doesn't exist (e.g. `D:\gb\`, `D:\pce\`)
+4. Drag & drop your ROM files into the folder
+5. Eject the SD card safely, insert into your device, and power on
+
+Filenames can be anything — the launcher shows them in a list. ZIP files containing a single ROM are also supported.
+
+### Complete SD card structure
 
 ```
 SD:\
-  nes\            -> Super Mario Bros.nes
-  gb\             -> Pokemon.gb
-  gbc\            -> Zelda.gbc
-  sega\           -> Sonic.sms
-  sg1000\         -> 
-  pce\            -> R-Type.pce
-  lynx\           ->
-  coleco\         ->
-  genesis\        -> Sonic.md  (or megadrive\)
-  snes\           ->
-  doom\           -> doom1.wad
-  msx\            ->
-  gw\             -> (Game & Watch, packed with LCD-Game-Shrinker)
-  romart\         -> (cover art, optional)
-  retro-go\
-    bios\         -> BIOS files (optional)
-    config\       -> wifi.json (optional)
+  gb\                   — Game Boy ROMs (.gb .gbc .zip)
+    Pokemon.gb
+    Zelda.gbc
+  gbc\                  — Game Boy Color ROMs (.gbc .gb .zip)
+  pce\                  — PC Engine ROMs (.pce .zip)
+    R-Type.pce
+  nes\                  — NES ROMs (.nes .fc .fds .nsf .zip)
+  snes\                 — SNES ROMs (.smc .sfc .zip)
+  gba\                  — GBA ROMs (.gba .zip)
+  sms\                  — Master System ROMs (.sms .sg .zip)
+  gg\                   — Game Gear ROMs (.gg .zip)
+  md\                   — Mega Drive ROMs (.md .gen .bin .zip)
+  col\                  — ColecoVision ROMs (.col .rom .zip)
+  lnx\                  — Atari Lynx ROMs (.lnx .zip)
+  gw\                   — Game & Watch (packed with LCD-Game-Shrinker)
+  doom\                 — DOOM WADs (.wad .zip)
+  msx\                  — MSX ROMs (.rom .mx1 .mx2 .dsk)
+  romart\               — Cover art PNGs (optional)
+    gb\
+      Pokemon.png
+    pce\
+      R-Type.png
+  retro-go\             — Config and BIOS (optional)
+    bios\
+      gb_bios.bin
+      gbc_bios.bin
+      fds_bios.bin
+      msx\...
+    config\
+      wifi.json
 ```
 
 ---

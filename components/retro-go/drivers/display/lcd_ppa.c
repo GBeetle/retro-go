@@ -63,6 +63,7 @@ lvgl_port_ppa_handle_t lvgl_port_ppa_create(const lvgl_port_ppa_cfg_t *cfg)
 
     ppa_client_config_t ppa_client_config = {
         .oper_type = PPA_OPERATION_SRM,
+        .max_pending_trans_num = 3,
     };
     ESP_GOTO_ON_ERROR(ppa_register_client(&ppa_client_config, &ppa_ctx->srm_handle), err, TAG,
                       "Error when registering PPA client!");
