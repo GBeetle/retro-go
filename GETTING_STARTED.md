@@ -98,29 +98,30 @@ Filenames can be anything — the launcher shows them in a list. ZIP files conta
 ### Complete SD card structure
 
 ```
-SD:\
-  gb\                   — Game Boy ROMs (.gb .gbc .zip)
-    Pokemon.gb
-    Zelda.gbc
-  gbc\                  — Game Boy Color ROMs (.gbc .gb .zip)
-  pce\                  — PC Engine ROMs (.pce .zip)
-    R-Type.pce
-  nes\                  — NES ROMs (.nes .fc .fds .nsf .zip)
-  snes\                 — SNES ROMs (.smc .sfc .zip)
-  gba\                  — GBA ROMs (.gba .zip)
-  sms\                  — Master System ROMs (.sms .sg .zip)
-  gg\                   — Game Gear ROMs (.gg .zip)
-  md\                   — Mega Drive ROMs (.md .gen .bin .zip)
-  col\                  — ColecoVision ROMs (.col .rom .zip)
-  lnx\                  — Atari Lynx ROMs (.lnx .zip)
-  gw\                   — Game & Watch (packed with LCD-Game-Shrinker)
-  doom\                 — DOOM WADs (.wad .zip)
-  msx\                  — MSX ROMs (.rom .mx1 .mx2 .dsk)
-  romart\               — Cover art PNGs (optional)
-    gb\
-      Pokemon.png
-    pce\
-      R-Type.png
+SD:
+  roms\
+    gb\                   — Game Boy ROMs (.gb .gbc .zip)
+      Pokemon.gb
+      Zelda.gbc
+    gbc\                  — Game Boy Color ROMs (.gbc .gb .zip)
+    pce\                  — PC Engine ROMs (.pce .zip)
+      R-Type.pce
+    nes\                  — NES ROMs (.nes .fc .fds .nsf .zip)
+    snes\                 — SNES ROMs (.smc .sfc .zip)
+    gba\                  — GBA ROMs (.gba .zip)
+    sms\                  — Master System ROMs (.sms .sg .zip)
+    gg\                   — Game Gear ROMs (.gg .zip)
+    md\                   — Mega Drive ROMs (.md .gen .bin .zip)
+    col\                  — ColecoVision ROMs (.col .rom .zip)
+    lnx\                  — Atari Lynx ROMs (.lnx .zip)
+    gw\                   — Game & Watch (packed with LCD-Game-Shrinker)
+    doom\                 — DOOM WADs (.wad .zip)
+    msx\                  — MSX ROMs (.rom .mx1 .mx2 .dsk)
+    romart\               — Cover art PNGs (optional)
+      gb\
+        Pokemon.png
+      pce\
+        R-Type.png
   retro-go\             — Config and BIOS (optional)
     bios\
       gb_bios.bin
